@@ -325,7 +325,6 @@ export function apply(ctx: Context, config: Config) {
     .usage(
       h.normalize([
         h.text("使用此命令回复一张图片作为问题，来添加问答。\n"),
-        // 修改了用法示例中选项和参数的顺序
         h.text("用法: imgadd [-p 概率] [-g] "), h.text("<回复内容...>\n"),
         h.text("特殊语法（在回复内容中使用）：\n"),
         h.text("　$$：一个普通的 $ 字符\n"),
@@ -439,7 +438,6 @@ export function apply(ctx: Context, config: Config) {
         h.text("查看已添加的图片问答。\n"),
         h.text("显示本群及全局问答，在私聊中仅显示全局问答。\n"),
         h.text("可以使用选项筛选范围：-G (仅全局), --guild-only (仅本群), -a (所有,需权限)。\n"),
-        // 修改了用法示例中选项和参数的顺序
         h.text("用法: imglist [-p 页码] [-s 条数] [范围选项]"),
       ]).join('')
     )
@@ -508,7 +506,6 @@ export function apply(ctx: Context, config: Config) {
       h.normalize([
         h.text("删除指定 ID 的图片问答。可以一次提供多个 ID，用逗号分隔。\n"),
         h.text("默认删除当前群聊的问答。使用 -g 选项可删除全局问答 (需要相应权限)。\n"),
-        // 修改了用法示例中选项和参数的顺序
         h.text("用法：imgdel [-g] "), h.text("<ID1,ID2,...>"),
       ]).join('')
     )
@@ -571,7 +568,6 @@ export function apply(ctx: Context, config: Config) {
         h.text("默认删除当前群聊的问答。使用 -g 选项可删除全局问答 (需要相应权限)。\n"),
         h.text(`为安全起见，哈希前缀至少需要 ${MIN_HASH_PREFIX_LENGTH} 位十六进制字符。\n`),
         h.text("如果前缀匹配到多个不同的完整哈希，操作将取消并提示。\n"),
-        // 修改了用法示例中选项和参数的顺序
         h.text("用法: imgdelall [-g] "), h.text("<哈希或前缀>"),
       ]).join('')
     )
@@ -623,7 +619,6 @@ export function apply(ctx: Context, config: Config) {
       h.normalize([
         h.text("根据问答 ID 查询并发送其对应的问题图片。\n"),
         h.text("在群聊中会查找本群及全局问答，在私聊中仅查找全局问答。使用 -g 可查询所有范围 (需要权限)。\n"),
-        // 修改了用法示例中选项和参数的顺序
         h.text("用法：imgget [-g] "), h.text("<ID>"),
       ]).join('')
     )
@@ -717,7 +712,6 @@ export function apply(ctx: Context, config: Config) {
         h.text(`扫描配置的图片存储目录 (${config.storagePath})，并删除数据库中不再引用的图片文件。\n`),
         h.text("此操作会永久删除文件且不可逆，请务必谨慎！\n"),
         h.text("需要权限等级 3，并且必须使用 -y 或 --confirm 选项确认执行。\n"),
-        // 修改了用法示例中选项和参数的顺序
         h.text("用法: imgclear -y"),
       ]).join('')
     )
@@ -839,7 +833,6 @@ export function apply(ctx: Context, config: Config) {
       h.normalize([
         h.text("修改指定 ID 的图片问答的回答内容或触发概率。\n"),
         h.text("使用 -g 选项可修改全局问答 (需要相应权限)。\n"),
-        // 修改了用法示例中选项和参数的顺序
         h.text("用法: imgmod [-g] [-p 新概率] "), h.text("<ID>"), h.text(" [新的回答内容...]\n"),
         h.text("必须提供新的回答内容或使用 -p 指定新概率，至少需要修改一项。\n"),
         h.text("回答内容支持特殊语法：\n"),
