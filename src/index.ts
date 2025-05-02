@@ -57,7 +57,8 @@ function selectWeightedRandom<T extends { probability: number }>(items: T[]): T 
   if (!validItems.length) return null;
 
   let totalProb = validItems.reduce((sum, item) => sum + item.probability, 0);
-  const useNormalizedProb = totalProb > 1; // 如果总概率 > 1，则进行标准化
+  // 如果总概率 > 1，选择时进行归一化；否则按实际概率选择
+  const useNormalizedProb = totalProb > 1;
   const targetProb = useNormalizedProb ? 1 : totalProb;
   const randomNum = Math.random() * targetProb;
 
@@ -144,7 +145,7 @@ async function processAndSaveImage(
   // 检查文件是否已存在，不存在则保存
   try {
     await fs.access(localImagePath);
-    // logger.debug(`[图片处理] ${purpose} 图片 (${filename}) 已存在，跳过写入。`);
+    // 文件已存在，跳过写入
   } catch (e) {
     if (e.code === 'ENOENT') { // 文件不存在
       try {
@@ -216,7 +217,7 @@ export function apply(ctx: Context, config: Config) {
 
     } catch (error) {
       // 下载或哈希计算失败，不做处理，仅记录日志
-      logger.warn(`[消息监听] 处理图片 ${imageUrl} 失败: ${error.message}`);
+      logger.warn(`[消息监听] 处理传入图片 ${imageUrl} 失败: ${error.message}`);
       return;
     }
 
@@ -233,72 +234,93 @@ export function apply(ctx: Context, config: Config) {
       const combinedResults = [...guildResults, ...globalResults]; // 合并结果
 
       if (combinedResults.length > 0) {
-        // 按概率选择一个回答
-        const selectedAnswerData = selectWeightedRandom(combinedResults);
-        if (!selectedAnswerData) return; // 没有有效概率的项被选中
+        // 1. 过滤掉概率为0的项，并计算有效总概率
+        const validItems = combinedResults.filter(item => item.probability > 0);
+        if (!validItems.length) return; // 没有有效概率的项，不触发
 
-        const matchScope = selectedAnswerData.guildId === GLOBAL_GUILD_ID ? '全局' : '本群';
-        logger.info(`[消息监听] 触发问答 ID ${selectedAnswerData.id} (范围: ${matchScope}, 哈希: ${hash.substring(0, 8)}...)`);
+        const totalProb = validItems.reduce((sum, item) => sum + item.probability, 0);
 
-        // 解析并处理回答内容中的特殊变量和格式
-        const rawAnswer = selectedAnswerData.answer;
-        const allMessageParts: h[][] = []; // 用于存储分条发送的消息段
-        let currentMessageElements: h[] = []; // 当前消息段的元素
-        let currentTextBuffer = ''; // 用于拼接文本片段
-        const senderName = session.author?.name || session.author?.nick || session.username || session.userId || '用户';
-        const botName: string = session.bot.user?.name || session.bot.user?.nick || session.selfId;
-        const parsedAnswerElements = h.parse(rawAnswer);
-
-        // 刷新文本缓冲区，将其内容转换为 h 元素并添加到当前消息段
-        const flushTextBuffer = () => {
-          if (currentTextBuffer) {
-            currentMessageElements.push(...h.parse(currentTextBuffer));
-            currentTextBuffer = '';
+        // 2. 进行触发判断 (如果 totalProb > 1, 则 Math.min(totalProb, 1.0) 为 1.0, 必定触发)
+        const triggerRoll = Math.random();
+        if (triggerRoll < Math.min(totalProb, 1.0)) {
+          // 3. 触发判断通过，才选择具体回答
+          const selectedAnswerData = selectWeightedRandom(validItems);
+          if (!selectedAnswerData) {
+            logger.warn(`[消息监听] 触发判断通过但未选定回答 (Hash: ${hash.substring(0, 8)}, Roll: ${triggerRoll}, TotalProb: ${totalProb})`);
+            return;
           }
-        };
 
-        // 遍历解析后的回答元素
-        for (const element of parsedAnswerElements) {
-          if (element.type === 'text' && element.attrs.content) {
-            // 处理文本中的特殊变量
-            let content = element.attrs.content;
-            const regex = /(\$\$)|(?<!\\)\$a|(?<!\\)\$s|(?<!\\)\$m|(?<!\\)\$n/g; // 匹配特殊变量
-            let lastIndex = 0;
-            let match: RegExpExecArray | null;
-            while ((match = regex.exec(content)) !== null) {
-              if (match.index > lastIndex) currentTextBuffer += content.substring(lastIndex, match.index);
-              if (match[1] === '$$') currentTextBuffer += '$'; // $$ -> $
-              else if (match[0] === '$a') { flushTextBuffer(); currentMessageElements.push(h.at(session.userId, { name: senderName })); } // $a -> @发送者
-              else if (match[0] === '$s') currentTextBuffer += senderName; // $s -> 发送者昵称
-              else if (match[0] === '$m') { flushTextBuffer(); currentMessageElements.push(h.at(session.selfId, { name: botName })); } // $m -> @机器人
-              else if (match[0] === '$n') { // $n -> 换行分条发送
-                flushTextBuffer();
-                if (currentMessageElements.length > 0) allMessageParts.push([...currentMessageElements]);
-                currentMessageElements = [];
+          const matchScope = selectedAnswerData.guildId === GLOBAL_GUILD_ID ? '全局' : '本群';
+          logger.info(`[消息监听] 触发问答 ID ${selectedAnswerData.id} (范围: ${matchScope}, 哈希: ${hash.substring(0, 8)}..., 概率: ${selectedAnswerData.probability})`);
+
+          // 4. 解析并处理回答内容
+          const rawAnswer = selectedAnswerData.answer;
+          const allMessageParts: h[][] = [];
+          let currentMessageElements: h[] = [];
+          let currentTextBuffer = '';
+          const senderName = session.author?.name || session.author?.nick || session.username || session.userId || '用户';
+          const botName: string = session.bot.user?.name || session.bot.user?.nick || session.selfId;
+          const parsedAnswerElements = h.parse(rawAnswer);
+
+          // 辅助函数，将缓冲区的文本转换为 h 对象并清空缓冲区
+          const flushTextBuffer = () => {
+            if (currentTextBuffer) {
+              currentMessageElements.push(...h.parse(currentTextBuffer));
+              currentTextBuffer = '';
+            }
+          };
+
+          // 遍历解析后的元素，处理特殊代码和图片
+          for (const element of parsedAnswerElements) {
+            if (element.type === 'text' && element.attrs.content) {
+              let content = element.attrs.content;
+              // 使用正则表达式匹配特殊代码 ($$, $a, $s, $m, $n)
+              const regex = /(\$\$)|(?<!\\)\$a|(?<!\\)\$s|(?<!\\)\$m|(?<!\\)\$n/g;
+              let lastIndex = 0;
+              let match: RegExpExecArray | null;
+              while ((match = regex.exec(content)) !== null) {
+                // 添加匹配前的文本
+                if (match.index > lastIndex) currentTextBuffer += content.substring(lastIndex, match.index);
+                // 处理特殊代码
+                if (match[1] === '$$') currentTextBuffer += '$'; // $$ -> $
+                else if (match[0] === '$a') { flushTextBuffer(); currentMessageElements.push(h.at(session.userId, { name: senderName })); } // $a -> @发送者
+                else if (match[0] === '$s') currentTextBuffer += senderName; // $s -> 发送者昵称
+                else if (match[0] === '$m') { flushTextBuffer(); currentMessageElements.push(h.at(session.selfId, { name: botName })); } // $m -> @机器人
+                else if (match[0] === '$n') { // $n -> 分条发送
+                  flushTextBuffer();
+                  if (currentMessageElements.length > 0) allMessageParts.push([...currentMessageElements]);
+                  currentMessageElements = [];
+                }
+                lastIndex = regex.lastIndex;
               }
-              lastIndex = regex.lastIndex;
+              // 添加最后一个匹配后的文本
+              if (lastIndex < content.length) currentTextBuffer += content.substring(lastIndex);
+            } else {
+              // 非文本元素，先处理缓冲区文本，再添加该元素
+              flushTextBuffer();
+              currentMessageElements.push(element);
             }
-            if (lastIndex < content.length) currentTextBuffer += content.substring(lastIndex); // 添加剩余文本
-          } else {
-            // 非文本元素直接添加到当前消息段
-            flushTextBuffer();
-            currentMessageElements.push(element);
           }
-        }
-        flushTextBuffer(); // 处理末尾的文本缓冲区
-        if (currentMessageElements.length > 0) allMessageParts.push(currentMessageElements); // 添加最后的消息段
+          // 处理末尾剩余的文本缓冲区
+          flushTextBuffer();
+          if (currentMessageElements.length > 0) allMessageParts.push(currentMessageElements);
 
-        // 分条发送所有消息段
-        for (const messagePart of allMessageParts) {
-          if (messagePart.length > 0) {
-            try {
-              await session.send(h.normalize(messagePart));
-            } catch (sendError) {
-              logger.error(`[消息监听] 发送消息段出错: ${sendError.message}`);
+          // 5. 分条发送所有消息段
+          for (const messagePart of allMessageParts) {
+            if (messagePart.length > 0) {
+              try {
+                await session.send(h.normalize(messagePart));
+              } catch (sendError) {
+                logger.error(`[消息监听] 发送消息段出错: ${sendError.message}`);
+              }
             }
           }
+          return; // 已处理，退出
+        } else {
+          // 触发判断未通过，不回复
+          logger.debug(`[消息监听] 图片 ${hash.substring(0, 8)}... 匹配到问答，但未达到触发阈值 (Roll: ${triggerRoll.toFixed(2)}, TotalProb: ${totalProb.toFixed(2)})`);
+          return;
         }
-        return; // 已处理，退出
       }
       // 如果没有匹配的问答，则不执行任何操作
 
@@ -312,9 +334,9 @@ export function apply(ctx: Context, config: Config) {
   // 添加/更新图片问答
   ctx.command(`${name}.add [...answerElements:el]`, '添加图片问答', { authority: 1 })
     .alias('添加图片回复', 'imgadd', '教图')
-    .option('probability', '-p <probability:number> 回复概率 (0-1, 默认 1.0)，概率总和大于1会进行标准化', { fallback: 1.0 })
+    .option('probability', '-p <probability:number> 回复概率 (0-1, 默认 1.0)，概率总和大于1会进行归一化', { fallback: 1.0 })
     .option('global', '-g, --global 设为全局问答 (需权限 3)', { authority: 3 })
-    .usage( // 详细用法说明 (保持不变)
+    .usage( // (未修改)
       h.normalize([
         h.text("使用此命令回复一张图片作为问题，来添加问答。\n"),
         h.text("用法: imgadd "), h.text("<回复内容...>"), h.text(" [-p 概率] [-g]\n"),
@@ -432,7 +454,7 @@ export function apply(ctx: Context, config: Config) {
     .option('globalOnly', '-G, --global-only 仅显示全局问答')
     .option('guildOnly', '--guild-only 仅显示本群问答 (需在群内使用)')
     .option('all', '-a, --all 查看所有范围的问答 (需权限 3)', { authority: 3 })
-    .usage( // 详细用法说明 (保持不变)
+    .usage( // (未修改)
       h.normalize([
         h.text("查看已添加的图片问答。\n"),
         h.text("显示本群及全局问答，在私聊中仅显示全局问答。\n"),
@@ -505,7 +527,7 @@ export function apply(ctx: Context, config: Config) {
   ctx.command(`${name}.delete <IDs:string>`, '删除指定ID的图片问答')
     .alias('删除图片回复', 'imgdel', '删图')
     .option('global', '-g, --global 删除全局问答 (需权限 3)', { authority: 3 })
-    .usage( // 详细用法说明 (保持不变)
+    .usage( // (未修改)
       h.normalize([
         h.text("删除指定 ID 的图片问答。可以一次提供多个 ID，用逗号分隔。\n"),
         h.text("默认删除当前群聊的问答。使用 -g 选项可删除全局问答 (需要相应权限)。\n"),
@@ -569,7 +591,7 @@ export function apply(ctx: Context, config: Config) {
   ctx.command(`${name}.delete.all <hashPrefix:string>`, '删除指定问题哈希(或前缀)对应的所有问答')
     .alias('删除图片全部回复', 'imgdelall', '删全图', '清图')
     .option('global', '-g, --global 删除全局问答 (需权限 3)', { authority: 3 })
-    .usage( // 详细用法说明 (保持不变)
+    .usage( // (未修改)
       h.normalize([
         h.text("删除指定问题图片哈希（或其前缀）对应的所有回答。\n"),
         h.text("默认删除当前群聊的问答。使用 -g 选项可删除全局问答 (需要相应权限)。\n"),
@@ -593,7 +615,7 @@ export function apply(ctx: Context, config: Config) {
       if (targetHashPrefix.length < MIN_HASH_PREFIX_LENGTH) return `哈希前缀过短，至少需要 ${MIN_HASH_PREFIX_LENGTH} 个十六进制字符以确保安全。`;
 
       try {
-        // 查询匹配前缀的记录，获取所有不同的完整哈希
+        // 查询匹配前缀的记录，获取所有不同的完整哈希 (安全检查)
         const queryPrefix = { guildId: targetGuildId, imageHash: { $regex: `^${targetHashPrefix}` } };
         const matchingRecords = await ctx.database.get(TABLE_NAME, queryPrefix, { fields: ['imageHash'] });
         const distinctHashes = [...new Set(matchingRecords.map(r => r.imageHash))];
@@ -623,7 +645,7 @@ export function apply(ctx: Context, config: Config) {
   // 查询问答ID对应的问题图片
   ctx.command(`${name}.query <ID:natural>`, '查询问答ID对应的问题图片')
     .alias('查询问答图片', 'imgget', '查图', '图ID')
-    .usage( // 详细用法说明 (保持不变)
+    .usage( // (未修改)
       h.normalize([
         h.text("根据问答 ID 查询并发送其对应的问题图片。\n"),
         h.text("在群聊中会查找本群及全局问答，在私聊中仅查找全局问答。\n"),
@@ -641,7 +663,7 @@ export function apply(ctx: Context, config: Config) {
         const records = await ctx.database.get(TABLE_NAME, { id: id, guildId: { $in: potentialGuildIds } });
 
         if (!records.length) { // 在可访问范围内未找到
-          // 检查该 ID 是否在其他范围存在
+          // 检查该 ID 是否在其他范围存在，以提供更准确的提示
           const existsAnywhere = await ctx.database.get(TABLE_NAME, { id: id }, { limit: 1, fields: ['guildId'] });
           if (existsAnywhere.length > 0) {
             return `问答 ID ${id} 存在，但不属于您当前可访问的范围 (本群或全局)。`;
@@ -697,7 +719,7 @@ export function apply(ctx: Context, config: Config) {
   ctx.command(`${name}.clear`, '清理本地存储中未被引用的图片', { authority: 3 })
     .alias('清理图片缓存', 'imgclear')
     .option('confirm', '-y, --confirm 必须确认执行此危险操作')
-    .usage( // 详细用法说明 (保持不变)
+    .usage( // (未修改)
       h.normalize([
         h.text(`扫描配置的图片存储目录 (${config.storagePath})，并删除数据库中不再引用的图片文件。\n`),
         h.text("此操作会永久删除文件且不可逆，请务必谨慎！\n"),
@@ -725,7 +747,7 @@ export function apply(ctx: Context, config: Config) {
         let totalProcessed = 0;
         while (true) {
           const batch = await ctx.database.get(TABLE_NAME, {}, {
-            limit: BATCH_SIZE_FOR_CLEAR, offset, fields: ['id', 'imageFilename', 'answer'] // 只需要这几个字段
+            limit: BATCH_SIZE_FOR_CLEAR, offset, fields: ['id', 'imageFilename', 'answer']
           });
           if (batch.length === 0) break; // 没有更多记录了
 
@@ -742,7 +764,7 @@ export function apply(ctx: Context, config: Config) {
                     try {
                       const url = new URL(src);
                       let imagePath = decodeURIComponent(url.pathname);
-                      // 处理 Windows 路径 (file:///C:/... -> C:/...)
+                      // 处理 Windows 路径 (如 file:///C:/... -> C:/...)
                       if (process.platform === 'win32' && imagePath.match(/^\/[a-zA-Z]:\//)) {
                         imagePath = imagePath.substring(1);
                       }
@@ -832,7 +854,7 @@ export function apply(ctx: Context, config: Config) {
     .alias('修改图片回复', 'imgmod', '改图')
     .option('probability', '-p <probability:number> 设置新的回复概率 (0-1)')
     .option('global', '-g, --global 修改全局问答 (需权限 3)', { authority: 3 })
-    .usage( // 详细用法说明 (保持不变)
+    .usage( // (未修改)
       h.normalize([
         h.text("修改指定 ID 的图片问答的回答内容或触发概率。\n"),
         h.text("使用 -g 选项可修改全局问答 (需要相应权限)。\n"),
@@ -869,6 +891,7 @@ export function apply(ctx: Context, config: Config) {
       }
       // 必须至少修改一项
       if (!newAnswerProvided && newProbability === undefined) {
+        // 区分是完全没提供，还是提供了空白内容
         if (typeof newAnswerContent === 'string' && newAnswerContent.length > 0 && newAnswerContent.trim().length === 0) {
           return `操作无效：您提供了只包含空白字符的新回答内容。请提供有效的回答或使用 -p 指定新概率。`;
         }
@@ -902,7 +925,7 @@ export function apply(ctx: Context, config: Config) {
         if (newAnswerProvided) {
           const parsedElements = h.parse(newAnswerContent);
           const processedNewAnswerElements: h[] = [];
-          // 处理新回答中的图片
+          // 处理新回答中的图片 (下载/保存/替换URI)
           for (const element of h.normalize(parsedElements)) {
             if (element.type === 'img' && element.attrs.src && !element.attrs.src.startsWith('file://')) {
               try {
@@ -922,7 +945,7 @@ export function apply(ctx: Context, config: Config) {
           }
           const finalSerializedAnswer = processedNewAnswerElements.map(el => el.toString()).join('');
 
-          // 仅当新回答与旧回答不同时才更新
+          // 仅当新回答与旧回答不同时才标记更新
           if (finalSerializedAnswer !== existingRecord.answer) {
             updateData.answer = finalSerializedAnswer; actualAnswerUpdate = true;
             // 生成回答预览
@@ -934,7 +957,7 @@ export function apply(ctx: Context, config: Config) {
 
         // 处理新的概率 (如果提供了)
         if (newProbability !== undefined) {
-          // 仅当新概率与旧概率不同时才更新
+          // 仅当新概率与旧概率不同时才标记更新
           if (newProbability !== existingRecord.probability) {
             updateData.probability = newProbability; actualProbabilityUpdate = true;
             updateDescriptionParts.push(`概率从 ${existingRecord.probability} 修改为 ${newProbability}`);
