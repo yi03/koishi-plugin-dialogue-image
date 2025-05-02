@@ -1,6 +1,6 @@
 {
   "name": "koishi-plugin-dialogue-image",
-  "description": "支持以图片作为问题的问答插件",
+  "description": "图片版dialogue插件。仅支持图片作为问题。",
   "version": "0.0.1",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
@@ -9,6 +9,11 @@
     "dist"
   ],
   "license": "MIT",
+  "homepage": "https://github.com/yi03/koishi-plugin-audio-processor",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yi03/koishi-plugin-audio-processor.git"
+  },
   "keywords": [
     "chatbot",
     "koishi",
