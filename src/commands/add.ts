@@ -12,16 +12,23 @@ export function registerAddCommand(ctx: Context, config: Config, resolvedStorage
     .alias('添加图片回复', 'imgadd', '教图')
     .option('probability', '-p <probability:number> 回复概率 (0-1, 默认 1.0)，概率总和大于1会进行归一化', { fallback: 1.0 })
     .option('global', '-g, --global 设为全局问答 (需权限 3)', { authority: 3 })
+    .option('targetGuild', '-t, --target-guild <guildId:string> 指定目标群组ID添加问答 (需权限 3)', { authority: 3 })
     .usage(
       h.normalize([
         h.text("使用此命令回复一张图片作为问题，来添加问答。\n"),
-        h.text("用法: imgadd [-p 概率] [-g] "), h.text("<回复内容...>\n"),
+        h.text(`用法: ${pluginName}.add [-p 概率] [-g | -t <群号>] `), h.text("<回复内容...>\n"),
+        h.text("选项说明:\n"),
+        h.text("  -p <概率>: 设置此回答的触发概率 (0-1, 默认 1.0)。\n"),
+        h.text("  -g, --global: 将问答设为全局生效 (需要权限 3)。\n"),
+        h.text("  -t, --target-guild <群号>: 指定将问答添加到特定群组 (需要权限 3)。\n"),
+        h.text("  注意: -g 和 -t 选项不能同时使用。\n"),
         h.text("特殊语法（在回复内容中使用）：\n"),
         h.text("　$$：一个普通的 $ 字符\n"),
         h.text("　$n：换行并分条发送\n"),
         h.text("　$a：@消息发送者\n"),
         h.text("　$m：@机器人自身\n"),
-        h.text("　$s：消息发送者的昵称"),
+        h.text("　$s：消息发送者的昵称\n"), // 修改：修正上一行末尾的逗号为换行
+        h.text("　$g：消息发送者在本群的群名片"), // <- 新增：添加 $g 的说明
       ]).join('')
     )
     .action(async ({ session, options }, answerElements: h[]) => {
@@ -33,11 +40,30 @@ export function registerAddCommand(ctx: Context, config: Config, resolvedStorage
         cleanedAnswerElements = cleanedAnswerElements.filter(el => !quoteElementStrings.has(el.toString()));
       }
 
-      const isGlobal = !!options.global;
-      const currentGuildId = session.guildId;
-      if (!isGlobal && !currentGuildId) return '添加本群问答需在群聊环境中使用。使用 -g 选项可添加全局问答。';
-      const targetGuildId = isGlobal ? GLOBAL_GUILD_ID : currentGuildId!;
-      const scopeText = isGlobal ? "全局" : `本群`;
+      let targetGuildId: string | null = null;
+      let scopeText: string = '';
+
+      // 检查互斥选项
+      if (options.global && options.targetGuild) {
+        return '不能同时使用 --global (-g) 和 --target-guild (-t) 选项。';
+      }
+
+      if (options.global) {
+        targetGuildId = GLOBAL_GUILD_ID;
+        scopeText = '全局';
+      } else if (options.targetGuild) {
+        if (!options.targetGuild.trim()) {
+            return '使用 -t (--target-guild) 选项时，必须提供有效的群组 ID。';
+        }
+        targetGuildId = options.targetGuild.trim();
+        scopeText = `指定群组 (${targetGuildId})`;
+      } else {
+        targetGuildId = session.guildId;
+        if (!targetGuildId) {
+          return '请在群聊环境中使用此命令以添加本群问答，或使用 -g 添加全局问答，或使用 -t <群号> 添加到指定群组。';
+        }
+        scopeText = '本群';
+      }
 
       if (!session.quote) return '请回复一张图片作为问题来添加/更新问答。';
       const quotedImages = h.select(session.quote.elements || [], 'img');
@@ -56,7 +82,7 @@ export function registerAddCommand(ctx: Context, config: Config, resolvedStorage
 
       try {
         const questionImageData = await processAndSaveImage(ctx, questionImageUrl, questionImageElement, 'question', resolvedStoragePath);
-        questionImageHash = questionImageData.hash;
+        questionImageHash = questionImageData.imageHash;
         questionImageFilename = questionImageData.filename;
 
         if (cleanedAnswerElements.length === 0) {
@@ -71,10 +97,10 @@ export function registerAddCommand(ctx: Context, config: Config, resolvedStorage
               const { localUri } = await processAndSaveImage(ctx, element.attrs.src, element, 'answer', resolvedStoragePath);
               processedAnswerElements.push(h.image(localUri));
             } catch (imgProcessingError) {
-              logger.error(`[教学] 处理回答图片失败: ${imgProcessingError.message}`);
+              logger.error(`[教学] 处理回答图片失败 (范围: ${scopeText}): ${imgProcessingError.message}`);
               return `添加/更新失败：处理回答中的图片时出错 (${imgProcessingError.message})。`;
             }
-          } else if (element.type !== 'text' || element.attrs.content?.trim()) { // 保留非空文本和其他元素
+          } else if (element.type !== 'text' || element.attrs.content?.trim()) {
             processedAnswerElements.push(element);
           }
         }
@@ -82,22 +108,22 @@ export function registerAddCommand(ctx: Context, config: Config, resolvedStorage
         if (processedAnswerElements.length === 0) return '处理后的回答内容为空。';
         const serializedAnswer = processedAnswerElements.map(el => el.toString()).join('');
 
-        // 查询是否存在相同问答
         const existingEntries = await ctx.database.get(TABLE_NAME, {
-          guildId: targetGuildId, imageHash: questionImageHash,
+          guildId: targetGuildId,
+          imageHash: questionImageHash,
         }, { fields: ['id', 'answer', 'probability'] });
 
         const exactMatch = existingEntries.find(e => e.answer === serializedAnswer);
 
-        if (exactMatch) { // 存在完全相同的问答
+        if (exactMatch) {
           if (exactMatch.probability === probability) {
             return `对于此问题图片，在 ${scopeText} 已存在完全相同的回答及概率 (ID: ${exactMatch.id})。无需操作。`;
-          } else { // 仅更新概率
+          } else {
             await ctx.database.set(TABLE_NAME, { id: exactMatch.id }, { probability });
             const count = await ctx.database.eval(TABLE_NAME, row => $.count(row.id), { guildId: targetGuildId, imageHash: questionImageHash });
             return `操作成功：已将 ${scopeText} 问答 ID ${exactMatch.id} 的概率从 ${exactMatch.probability} 更新为 ${probability}。\n此问题在 ${scopeText} 共有 ${Number(count)} 个回答。`;
           }
-        } else { // 创建新记录
+        } else {
           const createdRecord = await ctx.database.create(TABLE_NAME, {
             guildId: targetGuildId, imageHash: questionImageHash, imageFilename: questionImageFilename,
             answer: serializedAnswer, probability: probability, creatorId: session.userId, createdAt: new Date(),

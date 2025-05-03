@@ -64,8 +64,17 @@ export function registerListCommand(ctx: Context, config: Config, resolvedStorag
                 const output = list.map(item => {
                     let displayAnswer = item.answer.replace(/<image.*?>/g, '[图片]');
                     displayAnswer = displayAnswer.length > 30 ? displayAnswer.substring(0, 30) + '...' : displayAnswer;
-                    const scopeLabel = item.guildId === GLOBAL_GUILD_ID ? '全局' : `群`;
-                    return `ID:${item.id} | hash:${item.imageHash.substring(0, 8)} | [${scopeLabel}] | P:${item.probability} | A:${h.escape(displayAnswer)}`;
+
+                    let scopeLabel: string;
+                    if (item.guildId === GLOBAL_GUILD_ID) {
+                        scopeLabel = '全局';
+                    } else if (item.guildId) { // Check if guildId exists and is not the global one
+                        scopeLabel = `群${item.guildId}`;
+                    } else {
+                        scopeLabel = '群未知'; // Fallback if guildId is somehow missing
+                    }
+
+                    return `ID:${item.id} | hash:${item.imageHash.substring(0, 6)} | [${scopeLabel}] | P:${item.probability} | A:${h.escape(displayAnswer)}`;
                 }).join('\n');
 
                 const totalPages = Math.ceil(totalNum / limit);

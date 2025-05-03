@@ -11,7 +11,7 @@ declare module 'koishi' {
 export interface ImageQAMulti {
   id: number;           // 自增主键
   guildId: string;        // 群组ID ('' 代表全局作用域)
-  imageHash: string;      // 问题图片的MD5哈希
+  imageHash: string;      // 问题图片的感知哈希 (pHash, hex string)
   imageFilename?: string; // 问题图片本地文件名 (用于存储和 'query' 命令)
   answer: string;         // 回答内容 (序列化的 Element 数组)
   probability: number;    // 触发概率 (0-1)
