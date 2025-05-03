@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-dialogue-image",
   "description": "图片版dialogue插件。基于图片的主要视觉特征生成哈希值。仅支持图片作为问题。",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [
@@ -9,10 +9,10 @@
     "dist"
   ],
   "license": "MIT",
-  "homepage": "https://github.com/yi03/koishi-plugin-audio-processor",
+  "homepage": "https://github.com/yi03/koishi-plugin-dialogue-image",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yi03/koishi-plugin-audio-processor.git"
+    "url": "git+https://github.com/yi03/koishi-plugin-dialogue-image.git"
   },
   "keywords": [
     "chatbot",
