@@ -32,7 +32,7 @@ export function registerMessageListener(ctx: Context) {
     }
 
     if (!imageUrl) {
-      // logger.warn(`未能提取图片 URL: ${JSON.stringify(firstElement)}`); // 可选保留，用于排查奇怪的元素结构
+      logger.warn(`未能提取图片 URL: ${JSON.stringify(firstElement)}`); // 可选保留，用于排查奇怪的元素结构
       return;
     }
 
